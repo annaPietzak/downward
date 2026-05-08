@@ -90,6 +90,9 @@ class Condition:
             if part.has_universal_part():
                 return True
         return False
+    
+    def size(self):
+        return len(self.parts)
 
 class ConstantCondition(Condition):
     # Defining __eq__ blocks inheritance of __hash__, so must set it explicitly.
