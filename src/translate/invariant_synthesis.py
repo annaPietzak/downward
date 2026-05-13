@@ -15,6 +15,7 @@ var_map = dict()
 def check_SAT(candidates: Set[Disjunction], regression: Conjunction):
     solver = Minisat22()
 
+    # the regression simplifies to constant true / false or a conjunction
     if isinstance(regression, Truth): 
         # don't need to add to solver
         pass
@@ -29,6 +30,7 @@ def check_SAT(candidates: Set[Disjunction], regression: Conjunction):
                 return False
             else:
                 solver.add_clause([var_map[r]])
+    # candidates only contain clauses of literals, so each clause can be added as is
     for c in candidates:
         clause = []
         for l in c.parts:
@@ -39,18 +41,18 @@ def check_SAT(candidates: Set[Disjunction], regression: Conjunction):
 
 # strips regression from the planning lecture
 # since the regression is always called for the negation of a disjunction the formula here has to be a conjunction
-def strips_regression(operator: pddl.PropositionalAction, formula: Conjunction):
-    add_effects = [eff for _, eff in operator.add_effects]
-    del_effects = [eff for _, eff in operator.del_effects]
-    for atom in formula.parts:
-        if atom in del_effects:
-            return Falsity()
+# def strips_regression(operator: pddl.PropositionalAction, formula: Conjunction):
+#     add_effects = [eff for _, eff in operator.add_effects]
+#     del_effects = [eff for _, eff in operator.del_effects]
+#     for atom in formula.parts:
+#         if atom in del_effects:
+#             return Falsity()
 
-    result = Conjunction(operator.precondition + [atom for atom in formula.parts if atom not in add_effects])
-    return result.simplified()
+#     result = Conjunction(operator.precondition + [atom for atom in formula.parts if atom not in add_effects])
+#     return result.simplified()
 
+# regr(o, phi) = pre(o) and regr(eff(o), phi)
 def regression(operator: pddl.PropositionalAction, formula: Conjunction):
-    # TODO check add after delete semantic somewhere
     return Conjunction(operator.precondition + [_regression(operator.add_effects + [(condition, effect.negate()) for condition, effect in operator.del_effects], formula)]).simplified()
     
 
@@ -58,11 +60,17 @@ def regression(operator: pddl.PropositionalAction, formula: Conjunction):
 def _regression(effect: List[Tuple[List[Literal], Literal]], formula: Conjunction):
     if len(formula.parts) == 1:
         var = formula.parts[0]
+        # regr(True, e) = True
         if isinstance(var, Truth): return Truth() 
+        # regr(False, e) = False
         elif isinstance(var, Falsity): return Falsity()
         # elif var.negated:
         #     return _regression(effect, Conjunction([var.negate()])).negate()
         else:
+            # regr(literal, e) = effcond(literal, e) or (literal and not effcond(negative literal, e))
+            # if effcond(literal, e) = True and not effcond(negative literal, e) = True the whole formula evaluates to true
+            # -> True or (literal and not True) = True or (literal and False) = True or False = True
+            # so an add-after-delete semantic is given
             return Disjunction([
                 effcond(var, effect), 
                 Conjunction([
@@ -71,36 +79,46 @@ def _regression(effect: List[Tuple[List[Literal], Literal]], formula: Conjunctio
                     ])
                 ]).simplified()
     else:
+        # regr(phi and psi, e) = regr(phi, e) and regr(psi, e)
+        # we know that the formula is a conjunction, so we can disregard the rule for the regression of a disjunction
         return Conjunction([_regression(effect, Conjunction([part])) for part in formula.parts]).simplified()
 
+# the condition under which an effect makes a literal true
 def effcond(var: Literal, effects: List[Tuple[List[Literal], Literal]]) -> Disjunction:
     parts = []
     for condition, effect in effects:
         part = None
+        # effcond(literal, True) = False 
         if isinstance(effect, Truth): 
             part = Falsity()
+        # effcond(literal, e) = True, if e = literal
         elif var == effect: 
             part = Truth()
+        # effcond(literal, e) = False, if e = literal' != literal
         elif var != effect: 
             part = Falsity()
         
+        # effconf(literal, psi -> e) = psi and effcond(literal, e)
         if condition:
             part = Conjunction(condition + [part])
         
         parts.append(part)
-    
+    # effcond(literal, e and e') = effcond(literal, e) or effcond(literal, e')
     return Disjunction(parts).simplified()
 
 def create_new_candidates(candidates, c, new_atom):
     new_c = None
+    # check if the new atom is not already present in the discarded candidate c to avoid candidates of the form (a or a)
     if not new_atom in c.parts:
         new_c = Disjunction(list(c.parts) + [new_atom])
+        # check that the candidate is not already in the set
         for other_c in candidates:
             if new_c.parts == other_c.parts:
                 return None
     return new_c
     
-
+# remove invariants that contain another invariant, often tautologies
+# given (a or not a), (b or a or not a) the second one will be removed, since a stronger invariant is already present
 def remove_supersets(invariants: Set[Disjunction]):
     res = set()
     for c1 in invariants:
@@ -114,6 +132,7 @@ def remove_supersets(invariants: Set[Disjunction]):
             res.add(c1)
     return res
 
+# invariant algorithm as introduced by J. Rintanen 2008
 def invariants(
         state_variables: Set[pddl.Literal], 
         initial_state: List[Union[Atom, Assign]], 
@@ -128,6 +147,7 @@ def invariants(
         var_map.update({list(state_variables)[i]:i+1})
         var_map.update({list(state_variables)[i].negate():-1*(i+1)})
 
+    # initial candidates are all literals that are true in the initial state
     candidates_current = {Disjunction([Atom(v.predicate, v.args)]) for v in state_variables if v in initial_state}
     candidates_current |= {Disjunction([Atom(v.predicate, v.args).negate()]) for v in state_variables if v not in initial_state}
     print("initial candidates:")
@@ -140,8 +160,10 @@ def invariants(
         candidates_new = set()
         # inner loop
         while candidates_current:
+            # pick any candidate
             c = candidates_current.pop()
             valid = True
+            # check if candidate is invariant to all operator applications
             for o in operators:
                 reg = regression(o, c.negate())
                 sat_check = check_SAT(candidates_copy, reg)
@@ -164,9 +186,6 @@ def invariants(
         # stop if a fixpoint is reached
         if candidates_current == candidates_copy: 
             break
-    print("Final invariants")
-    for c in candidates_current:
-        print(f"{c.parts}")
 
     if reduce:
         return remove_supersets(candidates_current)
@@ -181,42 +200,8 @@ if __name__ == "__main__":
     task = pddl_parser.open()
     relaxed_reachable, atoms, actions, goals, axioms, _ = instantiate.explore(task)
 
-    # print("goal relaxed reachable: %s" % relaxed_reachable)
-    # print("%d atoms:" % len(atoms))
-    # for atom in atoms:
-    #     print(" ", atom)
-    # print()
-    # print("%d actions:" % len(actions))
-    # for action in actions:
-    #     for condition, effect in action.add_effects:
-    #         condition.dump()
-    #         effect.dump()
-    #     # action.dump()
-    #     print()
-    # print("%d axioms:" % len(axioms))
-    # for axiom in axioms:
-    #     axiom.dump()
-    #     print()
-    # print()
-    # if goals is None:
-    #     print("impossible goal")
-    # else:
-    #     print("%d goals:" % len(goals))
-    #     for literal in goals:
-    #         literal.dump()
-    # print()
-    # print(f"initial state (?): {task.init}")
-    # clause = Disjunction([list(atoms)[2]])
-    # print(f"atom {clause.parts}")
-    # for o in actions:
-    #     reg = regression(o, clause)
-    #     print(f"operator p {o.precondition}, a {o.add_effects}, d {o.del_effects}")
-    #     print(reg.parts)
-    #     print(f"Truth: {isinstance(reg, Truth)}")
-    #     print(f"Falsity: {isinstance(reg, Falsity)}")
-
     print("calculating invarints\n")
-    inv = invariants(state_variables=atoms, initial_state=task.init, operators=actions, limit=3, reduce=True)
-    print("Reduced invariants\n")
+    inv = invariants(state_variables=atoms, initial_state=task.init, operators=actions, limit=3, reduce=False)
+    print("Final invariants")
     for invariant in inv:
         print(invariant.parts)
