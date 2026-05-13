@@ -91,11 +91,35 @@ def effcond(var: Literal, effects: List[Tuple[List[Literal], Literal]]) -> Disju
     
     return Disjunction(parts).simplified()
 
+def create_new_candidates(candidates, c, new_atom):
+    new_c = None
+    if not new_atom in c.parts:
+        new_c = Disjunction(list(c.parts) + [new_atom])
+        for other_c in candidates:
+            if new_c.parts == other_c.parts:
+                return None
+    return new_c
+    
+
+def remove_supersets(invariants: Set[Disjunction]):
+    res = set()
+    for c1 in invariants:
+        superset = False
+        for c2 in invariants:
+            if c1.size() > c2.size():
+                if set(c2.parts).issubset(set(c1.parts)):
+                    superset = True
+                    break
+        if not superset:
+            res.add(c1)
+    return res
+
 def invariants(
         state_variables: Set[pddl.Literal], 
         initial_state: List[Union[Atom, Assign]], 
         operators: List[pddl.PropositionalAction], 
-        limit: int =2):
+        limit: int =2,
+        reduce: bool =True):
 
     # initiate mapping from atoms to integers for the SAT solver
     for i in range(len(state_variables)):
@@ -116,24 +140,19 @@ def invariants(
         candidates_new = set()
         # inner loop
         while candidates_current:
-            # print(f"candidates: {[c.parts for c in candidates_current]}")
             c = candidates_current.pop()
-            # print(f"picked candidate {c.parts}")
-
             valid = True
             for o in operators:
                 reg = regression(o, c.negate())
-                # print(f"regression of {c.negate().parts} through p {o.precondition} a {o.add_effects} d {o.del_effects} equals")
-                # reg.dump()
                 sat_check = check_SAT(candidates_copy, reg)
-                # print(f"candidates and regression is satisfiable: {sat_check}")
                 if sat_check:
                     # check limit
                     if c.size() < limit:
                         # add new candidates
-                        for v in state_variables:
-                            candidates_new |= {Disjunction(list(c.parts) + [Atom(v.predicate, v.args)])}
-                            candidates_new |= {Disjunction(list(c.parts) + [Atom(v.predicate, v.args).negate()])}
+                        for atom in ([Atom(v.predicate, v.args) for v in state_variables] + [Atom(v.predicate, v.args).negate() for v in state_variables]):
+                            new_candidate = create_new_candidates(candidates_new, c, atom)
+                            if new_candidate:
+                                candidates_new |= {new_candidate}
                     # break from the operator loop, since we already know candidate is not an invariant
                     valid = False
                     break
@@ -141,9 +160,6 @@ def invariants(
             if valid: candidates_new |= {c}
 
         candidates_current = candidates_new
-        # print(f"current candidates: {[c.parts for c in candidates_current]}")
-        # print(f"copied candidates: {[c.parts for c in candidates_copy]}")
-        # print(f"new candidates: {[c.parts for c in candidates_new]}")
 
         # stop if a fixpoint is reached
         if candidates_current == candidates_copy: 
@@ -151,7 +167,11 @@ def invariants(
     print("Final invariants")
     for c in candidates_current:
         print(f"{c.parts}")
-    return candidates_current
+
+    if reduce:
+        return remove_supersets(candidates_current)
+    else:
+        return candidates_current
 
 if __name__ == "__main__":
     from translate import pddl_parser
@@ -196,4 +216,7 @@ if __name__ == "__main__":
     #     print(f"Falsity: {isinstance(reg, Falsity)}")
 
     print("calculating invarints\n")
-    invariants(state_variables=atoms, initial_state=task.init, operators=actions, limit=3)
+    inv = invariants(state_variables=atoms, initial_state=task.init, operators=actions, limit=3, reduce=True)
+    print("Reduced invariants\n")
+    for invariant in inv:
+        print(invariant.parts)
