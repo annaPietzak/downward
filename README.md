@@ -1,3 +1,16 @@
+# Invariant Synthesis using Fast Downward
+
+This project implements the invariant synthesis algorithm introduced by J. Rintanen 2008 (<https://users.aalto.fi/~rintanj1/papers/Rintanen08ecairegr.pdf>).
+
+## Usage
+The invariant synthesis can be run directly from the script. It requires the [pysat](https://pysathq.github.io/installation/) package to be installed. It takes a problem defined in pddl files as input.
+
+Example, to be executed from the project root:
+```bash
+./src/translate/invariant_synthesis.py misc/tests/benchmarks/miconic/{domain.pddl,s1-0.pddl}
+```
+##
+
 <img src="misc/images/fast-downward.svg" width="800" alt="Fast Downward">
 
 Fast Downward is a domain-independent classical planning system.
