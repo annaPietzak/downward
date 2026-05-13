@@ -1,5 +1,9 @@
 #! /usr/bin/env python3
 
+import sys
+import os
+sys.path.insert(1, os.path.join(os.path.dirname(__file__), '..'))
+
 from typing import Set, List, Union, Tuple
 from pysat.solvers import Minisat22
 
@@ -132,6 +136,19 @@ def remove_supersets(invariants: Set[Disjunction]):
             res.add(c1)
     return res
 
+def remove_tautology(invariants: Set[Disjunction]):
+    res = set()
+    for c in invariants:
+        contains_tautology = False
+        for l in c.parts:
+            if l.negate() in c.parts:
+                contains_tautology = True
+                break
+        if not contains_tautology:
+            res.add(c)
+    return res
+
+
 # invariant algorithm as introduced by J. Rintanen 2008
 def invariants(
         state_variables: Set[pddl.Literal], 
@@ -188,7 +205,7 @@ def invariants(
             break
 
     if reduce:
-        return remove_supersets(candidates_current)
+        return remove_supersets(remove_tautology(candidates_current))
     else:
         return candidates_current
 
@@ -200,8 +217,9 @@ if __name__ == "__main__":
     task = pddl_parser.open()
     relaxed_reachable, atoms, actions, goals, axioms, _ = instantiate.explore(task)
 
+    # build
     print("calculating invarints\n")
-    inv = invariants(state_variables=atoms, initial_state=task.init, operators=actions, limit=3, reduce=False)
+    inv = invariants(state_variables=atoms, initial_state=task.init, operators=actions, limit=2, reduce=True)
     print("Final invariants")
     for invariant in inv:
         print(invariant.parts)
