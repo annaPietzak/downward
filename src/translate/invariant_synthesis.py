@@ -117,7 +117,7 @@ def create_new_candidates(candidates, c, new_atom):
         new_c = Disjunction(list(c.parts) + [new_atom])
         # check that the candidate is not already in the set
         for other_c in candidates:
-            if new_c.parts == other_c.parts:
+            if set(new_c.parts) == set(other_c.parts):
                 return None
     return new_c
     
@@ -219,7 +219,16 @@ if __name__ == "__main__":
 
     # build
     print("calculating invarints\n")
-    inv = invariants(state_variables=atoms, initial_state=task.init, operators=actions, limit=2, reduce=True)
-    print("Final invariants")
+    inv = invariants(state_variables=atoms, initial_state=task.init, operators=actions, limit=3, reduce=False)
+    print("\nFinal invariants")
+    for invariant in inv:
+        print(invariant.parts)
+
+    inv = remove_tautology(inv)
+    print("\nWithout tautologies")
+    for invariant in inv:
+        print(invariant.parts)
+    inv = remove_supersets(inv)
+    print("\nReduced invariants")
     for invariant in inv:
         print(invariant.parts)
